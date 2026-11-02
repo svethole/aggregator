@@ -84,7 +84,7 @@ sudo ssh -T git@github-aggregator
 
 ```bash
 cd /var/www
-sudo git clone git@github-aggregator:svethole/aggregator.git
+sudo git clone -b main git@github-aggregator:svethole/aggregator.git
 cd aggregator
 sudo npm ci --omit=dev --no-audit --no-fund
 
@@ -93,9 +93,6 @@ sudo mkdir -p /var/lib/aggregator
 sudo chown aggregator:aggregator /var/lib/aggregator
 sudo chmod 750 /var/lib/aggregator
 ```
-
-> Solange der Stand noch nicht in `main` übernommen ist, nach dem Klonen
-> `sudo git checkout claude/news-aggregator-innoreader-6smy69` ausführen.
 
 ### 5. Einstellungen
 
