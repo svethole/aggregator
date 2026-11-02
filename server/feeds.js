@@ -292,6 +292,45 @@ export async function discover(input) {
   };
 }
 
+/**
+ * Wie discover(), aber mit Ausweichwegen für veraltete Adressen (z. B. aus der Feedly-Suche):
+ * erst https statt http, dann die zugehörige Webseite nach aktuellen Feeds durchsuchen.
+ */
+export async function discoverWithFallback(input, fallbackUrl) {
+  let firstError;
+  try {
+    return await discover(input);
+  } catch (err) {
+    firstError = err;
+  }
+  const url = normalizeUrl(input);
+  if (url.startsWith('http://')) {
+    try {
+      return await discover('https://' + url.slice(7));
+    } catch {}
+  }
+  if (fallbackUrl) {
+    let site;
+    try {
+      site = normalizeUrl(fallbackUrl);
+    } catch {}
+    if (site && site !== url) {
+      try {
+        const d = await discover(site);
+        if (d.feeds.length || d.page) {
+          return {
+            ...d,
+            note:
+              `Der Feed aus der Suche ist nicht erreichbar (${firstError.message}). ` +
+              `Wahrscheinlich hat sich seine Adresse geändert. Auf der zugehörigen Webseite wurde Folgendes gefunden:`,
+          };
+        }
+      } catch {}
+    }
+  }
+  throw firstError;
+}
+
 // ---------------------------------------------------------------- Abrufen & Speichern
 
 function insertArticle(sourceId, a) {

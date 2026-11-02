@@ -33,6 +33,7 @@
       <div class="search">
         <span class="search-icon" data-icon="search"></span>
         <input id="search" type="search" placeholder="Artikel durchsuchen …  ( / )" autocomplete="off">
+        <button class="clear-btn" id="search-clear" type="button" title="Suche und Filter zurücksetzen" aria-label="Suche und Filter zurücksetzen" hidden data-icon="close"></button>
       </div>
       <div class="topbar-actions">
         <button class="icon-btn" id="btn-refresh" title="Alle Quellen aktualisieren (r)" data-icon="refresh"></button>
@@ -142,20 +143,32 @@
     <div class="dlg-body">
       <div data-pane="url">
         <form id="add-url-form" class="row">
-          <input id="add-url" type="text" placeholder="z. B. tagesschau.de oder https://example.org/feed.xml" required>
+          <span class="clearable"><input id="add-url" type="text" placeholder="z. B. tagesschau.de oder https://example.org/feed.xml" required><button class="clear-btn" type="button" data-clear="add-url" title="Eingabe löschen" aria-label="Eingabe löschen" hidden data-icon="close"></button></span>
           <button class="btn primary" type="submit">Prüfen</button>
         </form>
         <p class="muted small">Du kannst die Adresse eines RSS-/Atom-Feeds oder einfach einer Nachrichtenseite eingeben. Gibt es keinen Feed, wird die Seite regelmäßig nach neuen Artikeln durchsucht.</p>
       </div>
       <div data-pane="search" hidden>
         <form id="add-search-form" class="row">
-          <input id="add-search" type="search" placeholder="z. B. wissenschaft zoologie oder lokalnachrichten ludwigsburg" required>
+          <span class="clearable"><input id="add-search" type="search" placeholder="z. B. wissenschaft zoologie oder lokalnachrichten ludwigsburg" required><button class="clear-btn" type="button" data-clear="add-search" title="Eingabe löschen" aria-label="Eingabe löschen" hidden data-icon="close"></button></span>
           <button class="btn primary" type="submit">Suchen</button>
         </form>
         <p class="muted small" id="search-hint"></p>
         <div id="search-results"></div>
       </div>
-      <div id="add-options"></div>
+    </div>
+  </dialog>
+
+  <!-- Dialog: Abonnieren (öffnet sich über „Quelle hinzufügen“) -->
+  <dialog id="dlg-subscribe" class="dlg">
+    <form method="dialog" class="dlg-head">
+      <h2>Abonnieren</h2>
+      <button class="icon-btn" value="cancel" data-icon="close" title="Schließen"></button>
+    </form>
+    <div class="dlg-body dlg-scroll" id="subscribe-body"></div>
+    <div class="dlg-foot">
+      <button class="btn" type="button" id="subscribe-cancel">Abbrechen</button>
+      <button class="btn primary" type="button" id="subscribe-confirm">Abonnieren</button>
     </div>
   </dialog>
 
@@ -192,6 +205,6 @@
   </dialog>
 
   <div id="menu" class="menu" hidden></div>
-  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="toasts" class="toasts" aria-live="polite" popover="manual"></div>
 </body>
 </html>

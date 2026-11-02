@@ -84,6 +84,15 @@ test('Volltext wird per Readability geladen', async () => {
   assert.ok(!r.html.includes('Impressum'));
 });
 
+test('veralteter Feed-Link: Ausweichen auf die Webseite', async () => {
+  await assert.rejects(feeds.discover(base + '/veraltet.xml'), /403/);
+  const d = await feeds.discoverWithFallback(base + '/veraltet.xml', base + '/');
+  assert.equal(d.feeds[0].url, base + '/feed.xml');
+  assert.match(d.note, /nicht erreichbar/);
+  // Ohne Ausweich-Adresse bleibt es beim Fehler
+  await assert.rejects(feeds.discoverWithFallback(base + '/veraltet.xml'), /403/);
+});
+
 test('Spracherkennung', () => {
   assert.equal(content.detectLanguage('Octopuses dream, scientists say. Researchers observed sleeping octopuses changing colours in patterns that resemble dreaming in mammals.'), 'en');
   // Bei zu unsicherer Erkennung lieber „unbekannt“ als falsch
