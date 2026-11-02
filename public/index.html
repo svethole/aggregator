@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#1f6feb">
+  <title>Aggregator</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <!-- Anmeldung / Einrichtung -->
+  <section id="auth" class="auth" hidden>
+    <form id="auth-form" class="auth-card">
+      <div class="brand brand-lg"><img src="/icon.svg" alt=""> Aggregator</div>
+      <p id="auth-intro" class="muted"></p>
+      <label>Benutzername <input name="username" autocomplete="username" required></label>
+      <label>Passwort <input name="password" type="password" autocomplete="current-password" required minlength="1"></label>
+      <label id="auth-code-row" hidden>Einrichtungscode <input name="code" autocomplete="one-time-code" placeholder="steht im Server-Log"></label>
+      <p id="auth-error" class="error" hidden></p>
+      <button class="btn primary" type="submit" id="auth-submit">Anmelden</button>
+    </form>
+  </section>
+
+  <!-- Hauptanwendung -->
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <button class="icon-btn only-mobile" id="btn-menu" title="Menü" aria-label="Menü"></button>
+      <div class="brand"><img src="/icon.svg" alt=""><span>Aggregator</span></div>
+      <div class="search">
+        <span class="search-icon" data-icon="search"></span>
+        <input id="search" type="search" placeholder="Artikel durchsuchen …  ( / )" autocomplete="off">
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="btn-refresh" title="Alle Quellen aktualisieren (r)" data-icon="refresh"></button>
+        <button class="btn primary" id="btn-add" title="Quelle hinzufügen"><span data-icon="plus"></span><span class="hide-mobile">Hinzufügen</span></button>
+        <button class="icon-btn" id="btn-settings" title="Einstellungen" data-icon="settings"></button>
+      </div>
+    </header>
+
+    <aside class="sidebar" id="sidebar">
+      <nav id="nav"></nav>
+    </aside>
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+    <main class="content" id="content">
+      <div class="content-head">
+        <div class="content-title">
+          <h1 id="list-title">Alle Artikel</h1>
+          <span id="list-sub" class="muted"></span>
+        </div>
+        <div class="content-tools">
+          <div class="seg" id="view-modes" role="group" aria-label="Ansicht">
+            <button data-mode="details" title="Liste mit Details (1)" data-icon="list"></button>
+            <button data-mode="magazine" title="Liste mit Bild (2)" data-icon="magazine"></button>
+            <button data-mode="tiles" title="Kacheln (3)" data-icon="grid"></button>
+          </div>
+          <button class="icon-btn" id="btn-filter" title="Filter" data-icon="filter"></button>
+          <button class="btn" id="btn-unread" title="Nur ungelesene Artikel anzeigen"></button>
+          <button class="btn" id="btn-markall" title="Alle angezeigten Artikel als gelesen markieren"><span data-icon="check-all"></span><span class="hide-mobile">Alle gelesen</span></button>
+          <button class="btn danger" id="btn-clear-history" hidden><span data-icon="trash"></span><span class="hide-mobile">Verlauf löschen</span></button>
+        </div>
+      </div>
+
+      <div class="filterbar" id="filterbar" hidden>
+        <label>Zeitraum
+          <select id="f-period">
+            <option value="">Beliebig</option>
+            <option value="today">Heute</option>
+            <option value="yesterday">Gestern</option>
+            <option value="week">Diese Woche</option>
+            <option value="days7">Letzte 7 Tage</option>
+            <option value="month">Dieser Monat</option>
+            <option value="days30">Letzte 30 Tage</option>
+            <option value="custom">Benutzerdefiniert …</option>
+          </select>
+        </label>
+        <label class="f-custom" hidden>von <input type="date" id="f-from"></label>
+        <label class="f-custom" hidden>bis <input type="date" id="f-to"></label>
+        <label>Kategorie <select id="f-category"></select></label>
+        <label>Seite <select id="f-subscription"></select></label>
+        <label>Sprache <select id="f-lang"></select></label>
+        <button class="btn link" id="f-reset">Filter zurücksetzen</button>
+      </div>
+
+      <div id="articles" class="articles"></div>
+      <div id="list-sentinel" class="sentinel"></div>
+      <div id="list-empty" class="empty" hidden></div>
+    </main>
+
+    <!-- Leseansicht -->
+    <section id="reader" class="reader" hidden aria-modal="true" role="dialog">
+      <div class="reader-bar">
+        <button class="icon-btn" id="r-close" title="Schließen (Esc)" data-icon="back"></button>
+        <button class="icon-btn" id="r-prev" title="Vorheriger Artikel (k)" data-icon="up"></button>
+        <button class="icon-btn" id="r-next" title="Nächster Artikel (j)" data-icon="down"></button>
+        <div class="reader-bar-title" id="r-bar-title"></div>
+        <button class="icon-btn" id="r-fav" title="Favorit (s)" data-icon="star"></button>
+        <button class="icon-btn" id="r-read" title="Als ungelesen markieren (m)" data-icon="dot"></button>
+        <button class="btn small" id="r-fulltext" title="Zwischen Volltext und Feed-Inhalt wechseln"></button>
+        <button class="icon-btn" id="r-type" title="Schrift &amp; Farben" data-icon="type"></button>
+        <a class="icon-btn" id="r-open" title="Auf der Originalseite lesen (v)" target="_blank" rel="noopener noreferrer" data-icon="external"></a>
+      </div>
+      <div class="typo-panel" id="typo-panel" hidden>
+        <div class="typo-row">
+          <span>Schriftgröße</span>
+          <div class="typo-size">
+            <button class="icon-btn" id="t-size-dec" title="Kleiner">A−</button>
+            <input type="range" id="t-size" min="10" max="48" step="1">
+            <input type="number" id="t-size-num" min="8" max="96" step="1" aria-label="Schriftgröße in Pixel">
+            <button class="icon-btn" id="t-size-inc" title="Größer">A+</button>
+          </div>
+        </div>
+        <div class="typo-row"><span>Zeilenabstand</span><input type="range" id="t-lh" min="1.2" max="2.4" step="0.1"></div>
+        <div class="typo-row"><span>Breite</span>
+          <div class="seg" id="t-width">
+            <button data-v="narrow">Schmal</button><button data-v="medium">Mittel</button><button data-v="wide">Breit</button><button data-v="full">Voll</button>
+          </div>
+        </div>
+        <div class="typo-row column"><span>Schriftart</span><div class="font-list" id="t-fonts"></div></div>
+        <div class="typo-row column"><span>Farbschema</span><div class="theme-list" id="t-themes"></div></div>
+      </div>
+      <div class="reader-scroll" id="reader-scroll">
+        <article class="reader-article" id="reader-article"></article>
+      </div>
+    </section>
+  </div>
+
+  <!-- Dialog: Quelle hinzufügen -->
+  <dialog id="dlg-add" class="dlg wide">
+    <form method="dialog" class="dlg-head">
+      <h2>Quelle hinzufügen</h2>
+      <button class="icon-btn" value="cancel" data-icon="close" title="Schließen"></button>
+    </form>
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="url">Adresse eingeben</button>
+      <button class="tab" data-tab="search">Quellen suchen</button>
+    </div>
+    <div class="dlg-body">
+      <div data-pane="url">
+        <form id="add-url-form" class="row">
+          <input id="add-url" type="text" placeholder="z. B. tagesschau.de oder https://example.org/feed.xml" required>
+          <button class="btn primary" type="submit">Prüfen</button>
+        </form>
+        <p class="muted small">Du kannst die Adresse eines RSS-/Atom-Feeds oder einfach einer Nachrichtenseite eingeben. Gibt es keinen Feed, wird die Seite regelmäßig nach neuen Artikeln durchsucht.</p>
+      </div>
+      <div data-pane="search" hidden>
+        <form id="add-search-form" class="row">
+          <input id="add-search" type="search" placeholder="z. B. wissenschaft zoologie oder lokalnachrichten ludwigsburg" required>
+          <button class="btn primary" type="submit">Suchen</button>
+        </form>
+        <p class="muted small" id="search-hint"></p>
+        <div id="search-results"></div>
+      </div>
+      <div id="add-options"></div>
+    </div>
+  </dialog>
+
+  <!-- Dialog: Abo bearbeiten -->
+  <dialog id="dlg-sub" class="dlg">
+    <form method="dialog" class="dlg-head">
+      <h2>Abo bearbeiten</h2>
+      <button class="icon-btn" value="cancel" data-icon="close" title="Schließen"></button>
+    </form>
+    <div class="dlg-body" id="sub-body"></div>
+  </dialog>
+
+  <!-- Dialog: Einstellungen -->
+  <dialog id="dlg-settings" class="dlg">
+    <form method="dialog" class="dlg-head">
+      <h2>Einstellungen</h2>
+      <button class="icon-btn" value="cancel" data-icon="close" title="Schließen"></button>
+    </form>
+    <div class="dlg-body" id="settings-body"></div>
+  </dialog>
+
+  <!-- Dialog: Bestätigen / Eingabe -->
+  <dialog id="dlg-prompt" class="dlg small">
+    <form method="dialog" id="prompt-form">
+      <div class="dlg-body">
+        <p id="prompt-text"></p>
+        <input id="prompt-input" hidden>
+      </div>
+      <div class="dlg-foot">
+        <button class="btn" value="cancel" formnovalidate>Abbrechen</button>
+        <button class="btn primary" value="ok" id="prompt-ok">OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="menu" class="menu" hidden></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>

@@ -1,0 +1,29 @@
+# Aggregator als systemd-Dienst
+# Ziel: /etc/systemd/system/aggregator.service
+#   sudo cp deploy/aggregator.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now aggregator
+[Unit]
+Description=Aggregator (News-Reader, aggregator.svetho.net)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aggregator
+Group=aggregator
+WorkingDirectory=/var/www/aggregator
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server/index.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+
+# Absichern: Nur der Datenordner ist beschreibbar
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/aggregator
+MemoryMax=768M
+
+[Install]
+WantedBy=multi-user.target
