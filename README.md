@@ -41,6 +41,8 @@ Ist in der `.env` kein `ADMIN_USER`/`ADMIN_PASSWORD` gesetzt, zeigt die App beim
 
 ## Installation auf dem Hostinger-VPS
 
+Eine ausführliche Schritt-für-Schritt-Anleitung speziell für den Hostinger-VPS (Debian 13) steht in [`deploy/HOSTINGER.md`](deploy/HOSTINGER.md).
+
 Voraussetzung: Die DNS-Einträge für `aggregator.svetho.net` (A-Record, ggf. AAAA) zeigen auf die IP des VPS.
 
 ### Variante A: Docker (empfohlen)
