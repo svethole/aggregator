@@ -36,7 +36,19 @@ export function setPassword(userId, password) {
 }
 
 /** Legt beim ersten Start einen Benutzer aus ADMIN_USER/ADMIN_PASSWORD an. */
+export const proxyAuthEnabled = () => !!(config.proxyAuthHeader && config.proxyAuthUser);
+
 export function bootstrapAdmin() {
+  if (proxyAuthEnabled()) {
+    if (!q('SELECT 1 FROM users WHERE username = ?').get(config.proxyAuthUser)) {
+      createUser(config.proxyAuthUser, config.adminPassword || crypto.randomBytes(24).toString('base64url'));
+      console.log(`Benutzer „${config.proxyAuthUser}“ wurde angelegt.`);
+    }
+    console.log(`Anmeldung über den Webserver aktiv (Header ${config.proxyAuthHeader} → ${config.proxyAuthUser}).`);
+    if (!['127.0.0.1', '::1', 'localhost'].includes(config.host)) {
+      console.warn('ACHTUNG: HOST sollte 127.0.0.1 sein, damit nur der Webserver die App erreicht.');
+    }
+  }
   const { n } = q('SELECT COUNT(*) AS n FROM users').get();
   if (n > 0) return;
   if (config.adminUser && config.adminPassword) {
@@ -83,11 +95,24 @@ export function parseCookies(req, _res, next) {
   next();
 }
 
+function isLoopback(addr) {
+  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+}
+
+/** Anmeldung durch den vorgeschalteten Webserver (nur für Anfragen, die direkt von localhost kommen). */
+function proxyUser(req) {
+  if (!proxyAuthEnabled()) return null;
+  if (req.headers[config.proxyAuthHeader] !== '1') return null;
+  if (!isLoopback(req.socket.remoteAddress)) return null;
+  const row = q('SELECT id, username FROM users WHERE username = ?').get(config.proxyAuthUser);
+  return row ? { id: row.id, username: row.username, viaProxy: true } : null;
+}
+
 export function sessionUser(req, res) {
   const token = req.cookies?.[COOKIE];
-  if (!token) return null;
+  if (!token) return proxyUser(req);
   const row = q(`SELECT u.id, u.username, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`).get(token);
-  if (!row || row.expires_at <= Date.now()) return null;
+  if (!row || row.expires_at <= Date.now()) return proxyUser(req);
   // Sitzung gleitend verlängern (höchstens einmal am Tag)
   if (row.expires_at - Date.now() < (SESSION_DAYS - 1) * 86400_000) {
     q('UPDATE sessions SET expires_at = ? WHERE token = ?').run(Date.now() + SESSION_DAYS * 86400_000, token);

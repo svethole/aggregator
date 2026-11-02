@@ -241,6 +241,7 @@ async function boot() {
   if (!s.user) return showAuth(s.setup);
   state.user = s.user;
   state.search = s.search;
+  state.logoutUrl = s.logoutUrl;
   $('#auth').hidden = true;
   $('#app').hidden = false;
   const [settings, categories, subs] = await Promise.all([api('/settings'), api('/categories'), api('/subscriptions')]);
@@ -1343,6 +1344,7 @@ function openSettings() {
   $('#set-clear-history').onclick = clearHistory;
   $('#btn-logout').onclick = async () => {
     await api('/logout', { method: 'POST', body: {} });
+    if (state.logoutUrl) return location.assign(state.logoutUrl);
     location.hash = '';
     location.reload();
   };

@@ -10,6 +10,7 @@ import { discover, ensureSource, refreshSource, refreshAll, isRefreshing } from 
 import { loadFulltext } from './fulltext.js';
 import { searchSources, searchInfo } from './search.js';
 import { normalizeUrl } from './http.js';
+import { config } from './config.js';
 
 export const api = express.Router();
 
@@ -35,7 +36,12 @@ api.use((req, res, next) => {
 
 api.get('/session', (req, res) => {
   const user = sessionUser(req, res);
-  res.json({ user, setup: !user && needsSetup(), search: user ? searchInfo() : null });
+  res.json({
+    user,
+    setup: !user && needsSetup(),
+    search: user ? searchInfo() : null,
+    logoutUrl: user ? config.logoutUrl || null : null,
+  });
 });
 
 api.post('/setup', (req, res) => {

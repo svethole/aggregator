@@ -26,7 +26,13 @@ export const config = {
   searchFallback: bool(env.SEARCH_FALLBACK, true),
   allowPrivateNetwork: bool(env.ALLOW_PRIVATE_NETWORK, false),
   adminUser: env.ADMIN_USER || '',
+  // Anmeldung durch den vorgeschalteten Webserver (z. B. svetho-sso in nginx):
+  // Hat dieser Header den Wert "1", gilt PROXY_AUTH_USER als angemeldet.
+  proxyAuthHeader: (env.PROXY_AUTH_HEADER || '').toLowerCase(),
+  proxyAuthUser: env.PROXY_AUTH_USER || env.ADMIN_USER || '',
   adminPassword: env.ADMIN_PASSWORD || '',
+  // Wohin „Abmelden“ führt (z. B. https://svetho.net/abmelden bei gemeinsamer Anmeldung)
+  logoutUrl: env.LOGOUT_URL || '',
   userAgent:
     env.USER_AGENT ||
     'Mozilla/5.0 (compatible; Aggregator/0.1; +https://aggregator.svetho.net)',

@@ -1,152 +1,174 @@
-# Installation auf dem Hostinger-VPS (KVM 1, Debian 13)
+# Einrichtung auf dem Server (Hostinger-VPS, Debian 13, nginx)
 
-Diese Anleitung richtet den Aggregator mit **Docker** ein. Davor kommt **Caddy** (oder ein schon vorhandenes Nginx) für HTTPS. Alle Befehle werden als `root` per SSH ausgeführt.
+Die Einrichtung folgt dem Aufbau der anderen svetho-Subdomains:
 
-Die Ressourcen reichen locker: Die App braucht im Betrieb etwa 100–200 MB RAM und kaum CPU.
+- Der Code liegt in `/var/www/aggregator` und wird als root über einen Deploy-Key geklont.
+- nginx mit certbot sorgt für HTTPS.
+- Zugang gibt's nur über die **gemeinsame svetho-Anmeldung** (Snippet aus svetho-portal).
 
----
+Anders als die statischen Seiten braucht der Aggregator einen **eigenen Dienst**. Ein kleines Node.js-Programm ruft die Feeds regelmäßig ab und lauscht nur auf `127.0.0.1:3070`. nginx reicht die Anfragen dorthin weiter.
 
-## 0. Bestandsaufnahme
-
-```bash
-ssh root@<IP-DEINES-VPS>
-
-ss -tlnp | grep -E ':(80|443|3000)\b'   # Belegt schon etwas die Ports 80/443/3000?
-docker --version                          # Ist Docker schon installiert?
-systemctl is-active nginx apache2 caddy   # Läuft schon ein Webserver?
-```
-
-- **Ports 80/443 frei:** Weiter mit Caddy in Schritt 6a.
-- **Nginx läuft schon** (z. B. für svetho.net): Weiter mit Schritt 6b.
-- **Port 3000 belegt:** In `docker-compose.yml` z. B. `127.0.0.1:3010:3000` eintragen und unten überall 3010 statt 3000 verwenden.
-
-## 1. DNS-Eintrag
-
-Lege dort, wo die Domain `svetho.net` verwaltet wird (z. B. im hPanel unter *Domains → DNS*), einen Eintrag an:
-
-| Typ | Name | Ziel |
-|---|---|---|
-| A | `aggregator` | IPv4-Adresse des VPS |
-| AAAA | `aggregator` | IPv6-Adresse des VPS (optional) |
-
-Prüfen: `getent hosts aggregator.svetho.net` muss die IP des VPS liefern. Das kann ein paar Minuten dauern.
-
-## 2. Firewall
-
-Im hPanel unter *VPS → Sicherheit → Firewall* (falls aktiv) die Ports **22, 80 und 443** erlauben.
-Läuft auf dem Server zusätzlich `ufw`, dann so:
-
-```bash
-ufw allow OpenSSH && ufw allow 80/tcp && ufw allow 443/tcp
-```
-
-## 3. Docker installieren (falls noch nicht vorhanden)
-
-```bash
-apt update && apt install -y ca-certificates curl git
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
-  > /etc/apt/sources.list.d/docker.list
-apt update && apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-docker run --rm hello-world
-```
-
-## 4. Code holen
-
-Ist das Repository **privat**, braucht der Server einen schreibgeschützten Zugang über einen *Deploy Key*:
-
-```bash
-ssh-keygen -t ed25519 -f ~/.ssh/aggregator_deploy -N "" -C "vps-aggregator"
-cat ~/.ssh/aggregator_deploy.pub
-```
-
-Den ausgegebenen Schlüssel auf GitHub unter *svethole/aggregator → Settings → Deploy keys → Add deploy key* eintragen. Den Haken bei „Allow write access“ **nicht** setzen.
-
-```bash
-cat >> ~/.ssh/config <<'EOF'
-Host github-aggregator
-  HostName github.com
-  User git
-  IdentityFile ~/.ssh/aggregator_deploy
-EOF
-
-git clone -b claude/news-aggregator-innoreader-6smy69 git@github-aggregator:svethole/aggregator.git /opt/aggregator
-cd /opt/aggregator
-```
-
-> Der aktuelle Stand liegt derzeit auf dem Branch `claude/news-aggregator-innoreader-6smy69`. Wird er später nach `main` übernommen, wechselst Du mit `git fetch && git checkout main` dorthin.
-
-Bei einem **öffentlichen** Repository reicht `git clone -b claude/news-aggregator-innoreader-6smy69 https://github.com/svethole/aggregator.git /opt/aggregator`.
-
-## 5. Konfigurieren und starten
-
-```bash
-cd /opt/aggregator
-cp .env.example .env
-openssl rand -base64 18      # erzeugt ein sicheres Passwort zum Kopieren
-nano .env
-```
-
-Mindestens diese Werte setzen:
-
-```ini
-BASE_URL=https://aggregator.svetho.net
-ADMIN_USER=sven
-ADMIN_PASSWORD=<das erzeugte Passwort>
-BRAVE_API_KEY=<falls vorhanden>
-```
-
-```bash
-chmod 600 .env
-mkdir -p data && chown 1000:1000 data
-docker compose up -d --build
-docker compose logs -f        # Beenden mit Strg+C
-curl -sI http://127.0.0.1:3000 | head -1   # → HTTP/1.1 200 OK
-```
-
-## 6a. HTTPS mit Caddy (wenn Port 80/443 frei ist)
-
-Caddy ist bei Debian 13 direkt dabei und holt das Let's-Encrypt-Zertifikat automatisch:
-
-```bash
-apt install -y caddy
-cp /opt/aggregator/deploy/Caddyfile /etc/caddy/Caddyfile
-systemctl reload caddy
-journalctl -u caddy -n 50 --no-pager    # nach "certificate obtained" schauen
-```
-
-> Betreibt Caddy schon andere Seiten, hängst Du den Block aus `deploy/Caddyfile` an die bestehende `/etc/caddy/Caddyfile` an, statt sie zu überschreiben.
-
-## 6b. HTTPS mit vorhandenem Nginx
-
-```bash
-apt install -y certbot python3-certbot-nginx
-cp /opt/aggregator/deploy/nginx.conf /etc/nginx/sites-available/aggregator
-ln -s /etc/nginx/sites-available/aggregator /etc/nginx/sites-enabled/
-nginx -t && systemctl reload nginx
-certbot --nginx -d aggregator.svetho.net
-```
-
-## 7. Fertig 🎉
-
-**https://aggregator.svetho.net** öffnen und mit `ADMIN_USER`/`ADMIN_PASSWORD` anmelden.
-
-Danach kannst Du `ADMIN_PASSWORD` aus der `.env` löschen, denn der Benutzer ist ja schon angelegt. Das Passwort lässt sich in den Einstellungen der App ändern.
-
-Abos aus Inoreader übernimmst Du so: In Inoreader die OPML-Datei exportieren und in der App unter *Einstellungen → Importieren* hochladen.
-
----
-
-## Alltag
-
-| Was | Befehl (in `/opt/aggregator`) |
+| Was | Wo |
 |---|---|
-| Update einspielen | `git pull && docker compose up -d --build` |
-| Logs ansehen | `docker compose logs -f --tail 100` |
-| Neu starten | `docker compose restart` |
-| Passwort zurücksetzen | `docker compose exec -it aggregator node scripts/user.js passwd sven` |
-| Backup der Datenbank | `cp data/aggregator.db ~/aggregator-$(date +%F).db` (am besten kurz vorher `docker compose stop`) |
-| Speicherplatz alter Images freigeben | `docker image prune -f` |
+| Code | `/var/www/aggregator` (gehört root) |
+| Einstellungen | `/var/www/aggregator/.env` (root:aggregator, 640) |
+| Datenbank | `/var/lib/aggregator/aggregator.db` (gehört dem Dienstbenutzer `aggregator`) |
+| Dienst | `aggregator.service` (systemd, läuft als Benutzer `aggregator`) |
+| nginx | `/etc/nginx/sites-available/aggregator.svetho.net` |
 
-Die täglichen Hostinger-Backups sichern den ganzen Server und damit auch `/opt/aggregator/data`.
+Alle Befehle auf dem Server. Voraussetzung: Die svetho-Anmeldung aus **svetho-portal** läuft schon. Dazu gehören `/etc/nginx/snippets/svetho-sso-check.conf` und `/etc/nginx/conf.d/svetho-sso.conf`.
+
+---
+
+### 1. DNS-Eintrag für die Subdomain
+
+Beim DNS-Anbieter von svetho.net – genauso wie bei den anderen Subdomains:
+
+| Typ  | Name         | Wert                         |
+| ---- | ------------ | ---------------------------- |
+| A    | `aggregator` | IPv4-Adresse des Servers     |
+| AAAA | `aggregator` | IPv6-Adresse (falls genutzt) |
+
+```bash
+dig +short aggregator.svetho.net    # muss dasselbe liefern wie dig +short tschechisch.svetho.net
+```
+
+### 2. Node.js 22 installieren
+
+Debian 13 bringt nur Node.js 20 mit. Der Aggregator braucht mindestens 22.5, weil er die eingebaute SQLite-Datenbank von Node verwendet. Darum kommt Node von NodeSource:
+
+```bash
+sudo apt update
+sudo apt install -y curl git ca-certificates
+curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh
+sudo bash /tmp/nodesource_setup.sh
+sudo apt install -y nodejs
+node --version          # v22.x
+```
+
+Port 3070 muss frei sein:
+
+```bash
+sudo ss -tlnp | grep ':3070\b' || echo "frei"
+```
+
+Ist er belegt, nimmst Du einen anderen Port und trägst ihn in `.env` (PORT) und in der nginx-Konfiguration ein.
+
+### 3. Deploy-Key (einmalig, das Repo ist privat)
+
+Wie bei den anderen Repos: ein eigener Schlüssel nur zum Lesen, er liegt bei root.
+
+```bash
+sudo ssh-keygen -t ed25519 -N "" -C "deploy aggregator" -f /root/.ssh/deploy_aggregator
+
+# Öffentlichen Schlüssel anzeigen und bei GitHub eintragen:
+#   https://github.com/svethole/aggregator/settings/keys/new
+#   (Titel z. B. „svetho-server“, „Allow write access“ NICHT anhaken)
+sudo cat /root/.ssh/deploy_aggregator.pub
+
+sudo tee -a /root/.ssh/config >/dev/null <<'EOT'
+
+Host github-aggregator
+    HostName github.com
+    User git
+    IdentityFile /root/.ssh/deploy_aggregator
+    IdentitiesOnly yes
+EOT
+sudo chmod 600 /root/.ssh/config
+
+# Testen: „Hi svethole/aggregator! You've successfully authenticated …“
+sudo ssh -T git@github-aggregator
+```
+
+### 4. Klonen, Dienstbenutzer und Datenordner
+
+```bash
+cd /var/www
+sudo git clone git@github-aggregator:svethole/aggregator.git
+cd aggregator
+sudo npm ci --omit=dev --no-audit --no-fund
+
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin aggregator
+sudo mkdir -p /var/lib/aggregator
+sudo chown aggregator:aggregator /var/lib/aggregator
+sudo chmod 750 /var/lib/aggregator
+```
+
+> Solange der Stand noch nicht in `main` übernommen ist, nach dem Klonen
+> `sudo git checkout claude/news-aggregator-innoreader-6smy69` ausführen.
+
+### 5. Einstellungen
+
+```bash
+sudo cp .env.example .env
+sudo nano .env
+sudo chown root:aggregator .env && sudo chmod 640 .env
+```
+
+Die Vorlage passt schon für diesen Server: Port 3070, die gemeinsame Anmeldung und `/var/lib/aggregator`. Prüfen solltest Du nur:
+
+- `ADMIN_USER`: Dein Benutzername in der App, z. B. `sven`.
+- `BRAVE_API_KEY`: der Schlüssel für die Websuche, falls vorhanden.
+
+### 6. Dienst starten
+
+```bash
+sudo cp deploy/aggregator.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now aggregator
+sudo systemctl status aggregator          # „active (running)“
+sudo journalctl -u aggregator -n 20       # „Anmeldung über den Webserver aktiv …“
+curl -sI http://127.0.0.1:3070 | head -1  # HTTP/1.1 200 OK
+```
+
+### 7. nginx
+
+```bash
+sudo cp deploy/aggregator.svetho.net.conf /etc/nginx/sites-available/aggregator.svetho.net
+sudo ln -s /etc/nginx/sites-available/aggregator.svetho.net /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### 8. Zertifikat (Let's Encrypt)
+
+```bash
+sudo certbot --nginx -d aggregator.svetho.net
+```
+
+Die Frage nach der Umleitung von HTTP auf HTTPS beantwortest Du mit **2 (Redirect)**. certbot ergänzt den 443-Teil dann selbst. Die Zeilen `include …` und `proxy_set_header X-Svetho-Sso …` übernimmt es dabei mit.
+
+### 9. Ausprobieren
+
+https://aggregator.svetho.net öffnen. Ohne Anmeldung geht's zum Portal, danach zurück zum Aggregator, und zwar **ohne zweite Anmeldung**. „Abmelden“ in den Einstellungen der App führt zu `svetho.net/abmelden`.
+
+Abos aus Inoreader übernehmen: In Inoreader die Abos als OPML exportieren und in der App unter *Einstellungen → Importieren* hochladen.
+
+---
+
+## Aktualisieren
+
+```bash
+cd /var/www/aggregator && sudo ./aktualisieren.sh
+```
+
+Das Skript holt den neuesten Stand (`git pull`), installiert die Pakete neu und startet den Dienst neu.
+
+## Nützliches
+
+| Was | Befehl |
+|---|---|
+| Logs ansehen | `sudo journalctl -u aggregator -f` |
+| Neu starten | `sudo systemctl restart aggregator` |
+| Backup der Datenbank | `sudo cp /var/lib/aggregator/aggregator.db ~/aggregator-$(date +%F).db` |
+| Speicherverbrauch | `systemctl status aggregator` (Zeile „Memory“) |
+
+Die täglichen Hostinger-Backups sichern `/var/lib/aggregator` automatisch mit.
+
+## Wie die gemeinsame Anmeldung hier funktioniert
+
+1. `snippets/svetho-sso-check.conf` leitet ohne gültiges `svetho_sso`-Cookie zum Portal um, wie bei allen Subdomains.
+2. Zusätzlich gibt nginx der App per Header `X-Svetho-Sso` den Wert `$svetho_sso_ok` mit, also 1 oder 0. Diesen Wert berechnet die map in `conf.d/svetho-sso.conf`.
+3. Ein Header, den ein Browser selbst schickt, wird dabei von nginx überschrieben.
+4. Die App glaubt dem Header nur bei Anfragen von `127.0.0.1`, also nur von nginx. Bei `1` gilt `ADMIN_USER` als angemeldet.
+
+Soll die App stattdessen ihre **eigene** Anmeldung verwenden, lässt Du `PROXY_AUTH_HEADER` in der `.env` leer und setzt `ADMIN_PASSWORD`. Danach `sudo systemctl restart aggregator`.

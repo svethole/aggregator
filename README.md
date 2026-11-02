@@ -33,68 +33,18 @@ Ein selbst gehosteter News-Aggregator im Stil von Inoreader – für **aggregato
 
 ```bash
 npm install
-cp .env.example .env      # Werte anpassen (für lokal: BASE_URL leer lassen, HOST=127.0.0.1)
-npm start                 # → http://localhost:3000
+cp .env.example .env      # für lokal: BASE_URL, PROXY_AUTH_HEADER und LOGOUT_URL leeren,
+                          # DATA_DIR=./data und ADMIN_PASSWORD setzen
+npm start                 # → http://localhost:3070
 ```
 
 Ist in der `.env` kein `ADMIN_USER`/`ADMIN_PASSWORD` gesetzt, zeigt die App beim ersten Aufruf eine Einrichtungsseite. Den nötigen **Einrichtungscode** gibt der Server beim Start im Log aus.
 
-## Installation auf dem Hostinger-VPS
+## Installation auf dem Server
 
-Eine ausführliche Schritt-für-Schritt-Anleitung speziell für den Hostinger-VPS (Debian 13) steht in [`deploy/HOSTINGER.md`](deploy/HOSTINGER.md).
+Die Schritt-für-Schritt-Anleitung für den svetho-Server (Hostinger-VPS, Debian 13, nginx, gemeinsame svetho-Anmeldung) steht in **[`deploy/HOSTINGER.md`](deploy/HOSTINGER.md)**.
 
-Voraussetzung: Die DNS-Einträge für `aggregator.svetho.net` (A-Record, ggf. AAAA) zeigen auf die IP des VPS.
-
-### Variante A: Docker (empfohlen)
-
-```bash
-cd /opt
-git clone https://github.com/svethole/aggregator.git
-cd aggregator
-cp .env.example .env && nano .env        # Passwort, ggf. BRAVE_API_KEY setzen
-mkdir -p data && sudo chown 1000:1000 data
-docker compose up -d --build
-docker compose logs -f                   # prüfen, ob alles läuft
-```
-
-Danach brauchst Du noch HTTPS über einen Reverse-Proxy (siehe unten).
-
-**Update:** `git pull && docker compose up -d --build`
-
-### Variante B: Node.js direkt (mit systemd)
-
-```bash
-# Node.js 22 installieren (falls noch nicht vorhanden)
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt install -y nodejs
-
-sudo useradd --system --home /opt/aggregator aggregator
-sudo git clone https://github.com/svethole/aggregator.git /opt/aggregator
-cd /opt/aggregator
-sudo npm ci --omit=dev
-sudo cp .env.example .env && sudo nano .env
-sudo mkdir -p data && sudo chown -R aggregator:aggregator data .env
-sudo cp deploy/aggregator.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now aggregator
-journalctl -u aggregator -f
-```
-
-**Update:** `cd /opt/aggregator && sudo git pull && sudo npm ci --omit=dev && sudo systemctl restart aggregator`
-
-### HTTPS mit Nginx oder Caddy
-
-- **Nginx:**
-  ```bash
-  sudo cp deploy/nginx.conf /etc/nginx/sites-available/aggregator
-  sudo ln -s /etc/nginx/sites-available/aggregator /etc/nginx/sites-enabled/
-  sudo nginx -t && sudo systemctl reload nginx
-  sudo certbot --nginx -d aggregator.svetho.net
-  ```
-- **Caddy:** Den Inhalt von `deploy/Caddyfile` in `/etc/caddy/Caddyfile` übernehmen und `sudo systemctl reload caddy` ausführen. Das Zertifikat holt Caddy dann automatisch.
-
-### Hostinger „Node.js Web App“ (Shared/Cloud Hosting)
-
-Das geht grundsätzlich auch, wenn Node.js 22 auswählbar ist. Als Startbefehl `npm start` eintragen und die Umgebungsvariablen aus `.env.example` im hPanel setzen. Wichtig: `DATA_DIR` muss auf einen Ordner zeigen, der bei neuen Deployments erhalten bleibt. Außerdem muss der Prozess dauerhaft laufen dürfen, sonst werden die Feeds im Hintergrund nicht aktualisiert.
+Kurz gesagt läuft die App als systemd-Dienst auf `127.0.0.1:3070`, und nginx leitet `aggregator.svetho.net` dorthin weiter. Updates spielst Du mit `sudo ./aktualisieren.sh` ein.
 
 ## Benutzer verwalten
 
@@ -104,17 +54,19 @@ npm run user -- add <name>        # weiteren Benutzer anlegen
 npm run user -- passwd <name>     # Passwort zurücksetzen
 ```
 
-Mit Docker: `docker compose exec aggregator node scripts/user.js passwd sven`
+Auf dem Server: `cd /var/www/aggregator && sudo -u aggregator node --disable-warning=ExperimentalWarning scripts/user.js list`
+
+Bei gemeinsamer svetho-Anmeldung ist kein App-Passwort nötig.
 
 ## Datensicherung
 
-Alle Daten liegen in `data/aggregator.db`. Für ein konsistentes Backup im laufenden Betrieb:
+Alle Daten liegen in der Datei `aggregator.db` im `DATA_DIR`, auf dem Server also in `/var/lib/aggregator/aggregator.db`. Für ein konsistentes Backup im laufenden Betrieb:
 
 ```bash
-sqlite3 data/aggregator.db ".backup 'backup-$(date +%F).db'"
+sudo sqlite3 /var/lib/aggregator/aggregator.db ".backup 'backup-$(date +%F).db'"
 ```
 
-Alternativ den Dienst kurz stoppen und den Ordner `data/` kopieren.
+Alternativ den Dienst kurz stoppen (`sudo systemctl stop aggregator`) und den Ordner kopieren.
 
 ## Konfiguration
 
