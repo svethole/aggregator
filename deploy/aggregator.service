@@ -1,0 +1,23 @@
+# systemd-Dienst für den Betrieb ohne Docker
+# Installieren:  sudo cp deploy/aggregator.service /etc/systemd/system/
+#                sudo systemctl daemon-reload && sudo systemctl enable --now aggregator
+[Unit]
+Description=Aggregator (News-Reader)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aggregator
+WorkingDirectory=/opt/aggregator
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server/index.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/aggregator/data
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,5 @@
+# Alternative zu Nginx: Caddy holt das HTTPS-Zertifikat automatisch.
+aggregator.svetho.net {
+    encode gzip
+    reverse_proxy 127.0.0.1:3000
+}
