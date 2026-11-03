@@ -75,11 +75,24 @@ async function api(path, { method = 'GET', body, raw } = {}) {
 }
 
 function toast(msg, err = false) {
+  const box = $('#toasts');
   const el = document.createElement('div');
   el.className = 'toast' + (err ? ' err' : '');
   el.textContent = msg;
-  $('#toasts').append(el);
-  setTimeout(() => el.remove(), err ? 6000 : 3500);
+  box.append(el);
+  // Neu öffnen, damit die Meldung über einem gerade geöffneten Dialog liegt
+  try {
+    if (box.matches(':popover-open')) box.hidePopover();
+    box.showPopover();
+  } catch {}
+  setTimeout(() => {
+    el.remove();
+    if (!box.children.length) {
+      try {
+        box.hidePopover();
+      } catch {}
+    }
+  }, err ? 6000 : 3500);
 }
 
 const langNames = new Intl.DisplayNames(['de'], { type: 'language' });
@@ -310,9 +323,14 @@ function readHash() {
 }
 
 function select({ view = 'all', category = '', subscription = '' }) {
+  if (!$('#reader').hidden) closeReader();
   state.view = view;
-  state.filters.category = category ? String(category) : '';
-  state.filters.subscription = subscription ? String(subscription) : '';
+  // Ein Klick in der Seitenleiste zeigt wirklich alles aus dieser Auswahl
+  Object.assign(state.filters, {
+    category: category ? String(category) : '',
+    subscription: subscription ? String(subscription) : '',
+    lang: '', period: '', from: '', to: '', q: '',
+  });
   $('#app').classList.remove('nav-open');
   renderAll();
   reloadArticles();
@@ -461,8 +479,16 @@ function promptDialog(text, { input = false, value = '', ok = 'OK', danger = fal
     $('#prompt-ok').className = 'btn ' + (danger ? 'danger' : 'primary');
     d.returnValue = '';
     d.onclose = () => resolve(d.returnValue === 'ok' ? (input ? inp.value.trim() : true) : null);
+    // Enter im Eingabefeld bestätigt (sonst würde der erste Knopf im Formular – „Abbrechen“ – auslösen)
+    inp.onkeydown = (e) => {
+      if (e.key === 'Enter' && !e.isComposing) {
+        e.preventDefault();
+        d.close('ok');
+      }
+    };
     d.showModal();
     if (input) inp.select();
+    else $('#prompt-ok').focus();
   });
 }
 
@@ -599,6 +625,7 @@ function renderHead() {
   $('#f-from').value = f.from;
   $('#f-to').value = f.to;
   if ($('#search').value !== f.q) $('#search').value = f.q;
+  updateSearchClear();
 }
 
 function renderAll() {
@@ -641,6 +668,8 @@ $('#f-reset').addEventListener('click', () => {
   reloadArticles();
 });
 $('#search').addEventListener('input', (e) => {
+  if (!$('#reader').hidden) closeReader();
+  updateSearchClear();
   debounce('search', () => {
     state.filters.q = e.target.value.trim();
     writeHash();
@@ -649,6 +678,43 @@ $('#search').addEventListener('input', (e) => {
 });
 $('#btn-menu').addEventListener('click', () => $('#app').classList.toggle('nav-open'));
 $('#sidebar-backdrop').addEventListener('click', () => $('#app').classList.remove('nav-open'));
+
+const filtersActive = () => {
+  const f = state.filters;
+  return !!($('#search').value || f.q || f.lang || f.period || f.from || f.to);
+};
+function updateSearchClear() {
+  $('#search-clear').hidden = !filtersActive();
+}
+$('#search-clear').addEventListener('click', () => {
+  // Suchbegriff und Filter löschen, die Auswahl in der Seitenleiste bleibt
+  Object.assign(state.filters, { q: '', lang: '', period: '', from: '', to: '' });
+  $('#search').value = '';
+  if (!$('#reader').hidden) closeReader();
+  renderAll();
+  reloadArticles();
+  $('#search').focus();
+});
+$('#search').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && e.target.value) {
+    e.preventDefault();
+    e.stopPropagation();
+    $('#search-clear').click();
+  }
+});
+
+// Allgemeine Löschen-Knöpfe in Eingabefeldern (data-clear="<id des Felds>")
+for (const btn of $$('[data-clear]')) {
+  const input = document.getElementById(btn.dataset.clear);
+  const sync = () => (btn.hidden = !input.value);
+  input.addEventListener('input', sync);
+  btn.addEventListener('click', () => {
+    input.value = '';
+    sync();
+    if (input.id === 'add-search') $('#search-results').innerHTML = '';
+    input.focus();
+  });
+}
 
 async function clearHistory() {
   if (!(await promptDialog('Den gesamten Leseverlauf löschen? Favoriten und der Gelesen-Status bleiben erhalten.', { ok: 'Verlauf löschen', danger: true }))) return;
@@ -1063,11 +1129,10 @@ $('#r-fulltext').addEventListener('click', () => {
 
 // ================================================================ Quelle hinzufügen
 const addDlg = $('#dlg-add');
+const subDlg = $('#dlg-subscribe');
 $('#btn-add').addEventListener('click', () => openAddDialog());
 
 function openAddDialog(tab = 'url') {
-  $('#add-options').innerHTML = '';
-  $('#search-results').innerHTML = '';
   switchTab(tab);
   const web = state.search?.web;
   $('#search-hint').innerHTML =
@@ -1080,36 +1145,49 @@ function openAddDialog(tab = 'url') {
 function switchTab(tab) {
   $$('#dlg-add .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
   $$('#dlg-add [data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== tab));
-  $('#add-options').innerHTML = '';
 }
 $$('#dlg-add .tab').forEach((t) => t.addEventListener('click', () => switchTab(t.dataset.tab)));
 
 $('#add-url-form').addEventListener('submit', (e) => {
   e.preventDefault();
-  discoverUrl($('#add-url').value);
+  const url = $('#add-url').value.trim();
+  if (url) discoverUrl(url, {}, e.submitter || $('#add-url-form button[type=submit]'));
 });
 
-async function discoverUrl(url, hint = {}) {
-  const box = $('#add-options');
-  box.innerHTML = '<p class="muted">Adresse wird geprüft …</p>';
-  box.scrollIntoView({ block: 'nearest' });
+// Prüft eine Adresse und öffnet bei Erfolg den Abonnieren-Dialog.
+// Fehler erscheinen als schwebende Meldung, der Inhalt des Dialogs bleibt, wo er ist.
+async function discoverUrl(url, hint = {}, btn = null) {
+  const label = btn?.innerHTML;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Prüfe …';
+  }
   try {
-    const d = await api('/discover', { method: 'POST', body: { url } });
-    renderAddOptions(d, hint);
+    const d = await api('/discover', { method: 'POST', body: { url, fallbackUrl: hint.siteUrl || undefined } });
+    if (!d.feeds.length && !d.page) throw new Error('Unter dieser Adresse wurde nichts Abonnierbares gefunden.');
+    openSubscribeDialog(d, hint);
   } catch (err) {
-    box.innerHTML = `<p class="error">${esc(err.message)}</p>`;
+    toast(err.message, true);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = label;
+    }
   }
 }
 
 function categoryPicker(selected = []) {
   return `
-    <div class="cat-picker" id="cat-picker">
+    <div class="cat-picker">
       ${state.categories.map((c) => `<label><input type="checkbox" value="${c.id}" ${selected.includes(c.id) ? 'checked' : ''}> ${esc(c.name)}</label>`).join('')}
       <button type="button" class="btn small" data-new-cat>+ Neue Kategorie</button>
     </div>`;
 }
+// Ausgewählte Kategorien immer nur innerhalb des jeweiligen Dialogs lesen
+const pickedCategories = (root) => $$('.cat-picker input:checked', root).map((x) => Number(x.value));
+
 async function handleNewCatInPicker(container) {
-  const checked = $$('input:checked', container).map((i) => Number(i.value));
+  const checked = pickedCategories(container);
   const c = await newCategory();
   if (c) container.outerHTML = categoryPicker([...checked, c.id]);
 }
@@ -1118,13 +1196,12 @@ document.addEventListener('click', (e) => {
   if (b) handleNewCatInPicker(b.closest('.cat-picker'));
 });
 
-function renderAddOptions(d, hint = {}) {
+let subscribeOpts = [];
+function openSubscribeDialog(d, hint = {}) {
   const opts = [...d.feeds];
-  if (d.page) opts.push(d.page);
-  if (!opts.length) {
-    $('#add-options').innerHTML = '<p class="error">Unter dieser Adresse wurde nichts Abonnierbares gefunden.</p>';
-    return;
-  }
+  // „Webseite beobachten“ nur anbieten, wenn dort Artikel erkannt wurden (oder es keinen Feed gibt)
+  if (d.page && (d.page.count > 0 || !d.feeds.length)) opts.push(d.page);
+  subscribeOpts = opts;
   const already = (o) => state.subs.find((s) => s.url === o.url && s.type === o.type);
   const firstFree = Math.max(0, opts.findIndex((o) => !already(o)));
   const preselected = state.filters.category && state.filters.category !== 'none' ? [Number(state.filters.category)] : [];
@@ -1137,7 +1214,7 @@ function renderAddOptions(d, hint = {}) {
         <div class="muted small">${esc(o.url)} · ${o.count} Artikel gefunden${o.language ? ' · ' + esc(langName(o.language)) : ''}</div>
         ${o.description ? `<div class="small">${esc(o.description).slice(0, 220)}</div>` : ''}
       </div>
-      ${o.samples?.length ? `<ul class="samples">${o.samples.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>` : ''}
+      ${o.samples?.length ? `<ul class="samples">${o.samples.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
       ${o.type === 'scrape' ? `
         <details>
           <summary class="small">Erweitert: CSS-Selektor für Artikel-Links</summary>
@@ -1145,53 +1222,68 @@ function renderAddOptions(d, hint = {}) {
           <input class="selector-input" data-i="${i}" placeholder="z. B. article h2 a" style="width:100%">
         </details>` : ''}
     </label>`).join('');
-  $('#add-options').innerHTML = `
+  $('#subscribe-body').innerHTML = `
+    ${d.note ? `<p class="notice">${esc(d.note)}</p>` : ''}
     <div class="field"><span>Was möchtest Du abonnieren?</span>${optHtml}</div>
     ${!d.feeds.length && d.page ? '<p class="small muted">Für diese Seite wurde kein RSS-Feed gefunden. Sie wird stattdessen regelmäßig nach neuen Artikeln durchsucht.</p>' : ''}
     <label class="field"><span>Name</span><input id="add-title" value="${esc(hint.title || opts[firstFree].title || '')}"></label>
     <div class="field"><span>Kategorien</span>${categoryPicker(preselected)}</div>
-    <div><button class="btn primary" id="add-confirm">${icon('plus')} Abonnieren</button></div>
   `;
-  $$('#add-options input[name=opt]').forEach((r) =>
+  $$('#subscribe-body input[name=opt]').forEach((r) =>
     r.addEventListener('change', () => {
       $('#add-title').value = opts[Number(r.value)].title || '';
     }),
   );
-  $('#add-confirm').addEventListener('click', async (e) => {
-    const btn = e.currentTarget;
-    const i = Number($('#add-options input[name=opt]:checked').value);
-    const o = opts[i];
-    btn.disabled = true;
-    btn.textContent = 'Wird abonniert und abgerufen …';
-    try {
-      const sub = await api('/subscriptions', {
-        method: 'POST',
-        body: {
-          type: o.type,
-          url: o.url,
-          title: $('#add-title').value.trim(),
-          categoryIds: $$('#cat-picker input:checked').map((x) => Number(x.value)),
-          selector: $(`.selector-input[data-i="${i}"]`)?.value.trim() || undefined,
-        },
-      });
-      addDlg.close();
-      toast(`„${sub.title}“ abonniert`);
-      if (sub.lastError) toast(`Hinweis: ${sub.lastError}`, true);
-      await reloadMeta();
-      select({ subscription: sub.id });
-    } catch (err) {
-      toast(err.message, true);
-      btn.disabled = false;
-      btn.innerHTML = `${icon('plus')} Abonnieren`;
-    }
-  });
+  const btn = $('#subscribe-confirm');
+  btn.disabled = false;
+  btn.innerHTML = `${icon('plus')} Abonnieren`;
+  subDlg.showModal();
+  $('#subscribe-body').scrollTop = 0;
+}
+
+$('#subscribe-cancel').addEventListener('click', () => subDlg.close());
+$('#subscribe-confirm').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const i = Number($('#subscribe-body input[name=opt]:checked').value);
+  const o = subscribeOpts[i];
+  btn.disabled = true;
+  btn.textContent = 'Wird abonniert …';
+  try {
+    const sub = await api('/subscriptions', {
+      method: 'POST',
+      body: {
+        type: o.type,
+        url: o.url,
+        title: $('#add-title').value.trim(),
+        categoryIds: pickedCategories(subDlg),
+        selector: $(`#subscribe-body .selector-input[data-i="${i}"]`)?.value.trim() || undefined,
+      },
+    });
+    subDlg.close();
+    addDlg.close();
+    toast(`„${sub.title}“ abonniert`);
+    if (sub.lastError) toast(`Hinweis: ${sub.lastError}`, true);
+    await reloadMeta();
+    select({ subscription: sub.id });
+  } catch (err) {
+    toast(err.message, true);
+    btn.disabled = false;
+    btn.innerHTML = `${icon('plus')} Abonnieren`;
+  }
+});
+
+function ageHint(ts) {
+  if (!ts) return '';
+  const days = Math.floor((Date.now() - ts) / DAY);
+  if (days > 90) return ` · <span class="warn-text">seit ${days > 365 ? 'über einem Jahr' : days + ' Tagen'} nicht aktualisiert</span>`;
+  return ` · zuletzt aktualisiert ${esc(fmtDate(ts))}`;
 }
 
 $('#add-search-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const qy = $('#add-search').value.trim();
+  if (!qy) return;
   const box = $('#search-results');
-  $('#add-options').innerHTML = '';
   box.innerHTML = '<p class="muted">Suche läuft …</p>';
   try {
     const r = await api('/search?q=' + encodeURIComponent(qy));
@@ -1200,11 +1292,11 @@ $('#add-search-form').addEventListener('submit', async (e) => {
         ${favicon(x.icon, x.title)}
         <div style="min-width:0">
           <div class="r-title">${esc(x.title || x.url)}</div>
-          <div class="r-url">${esc(x.siteUrl || x.url)}</div>
+          <div class="r-url">${esc(x.kind === 'feed' ? x.url : x.siteUrl || x.url)}</div>
           ${x.description ? `<div class="r-desc">${esc(x.description)}</div>` : ''}
-          ${x.subscribers ? `<div class="small muted">${x.subscribers.toLocaleString('de-DE')} Abonnenten bei Feedly${x.language ? ' · ' + esc(langName(x.language)) : ''}</div>` : ''}
+          ${x.kind === 'feed' ? `<div class="small muted">${x.subscribers ? x.subscribers.toLocaleString('de-DE') + ' Abonnenten bei Feedly' : 'Feed'}${x.language ? ' · ' + esc(langName(x.language)) : ''}${ageHint(x.lastUpdated)}</div>` : ''}
         </div>
-        <button class="btn small primary" data-url="${esc(x.url)}" data-title="${esc(x.title || '')}">Abonnieren</button>
+        <button class="btn small primary" data-url="${esc(x.url)}" data-site="${esc(x.kind === 'feed' ? x.siteUrl || '' : '')}" data-title="${esc(x.title || '')}">Abonnieren</button>
       </div>`;
     let html = '';
     if (r.feeds.length) html += `<div class="results-head">Feeds</div>${r.feeds.map(row).join('')}`;
@@ -1218,7 +1310,7 @@ $('#add-search-form').addEventListener('submit', async (e) => {
 });
 $('#search-results').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-url]');
-  if (b) discoverUrl(b.dataset.url, { title: b.dataset.title });
+  if (b) discoverUrl(b.dataset.url, { title: b.dataset.title, siteUrl: b.dataset.site }, b);
 });
 
 // ================================================================ Abo bearbeiten
@@ -1255,7 +1347,7 @@ function editSubscription(id) {
         method: 'PATCH',
         body: {
           title: $('#sub-title').value.trim(),
-          categoryIds: $$('#sub-body .cat-picker input:checked').map((x) => Number(x.value)),
+          categoryIds: pickedCategories($('#sub-body')),
           ...(s.type === 'scrape' ? { selector: $('#sub-selector').value.trim() } : {}),
         },
       });

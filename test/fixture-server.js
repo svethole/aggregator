@@ -10,6 +10,12 @@ export function createFixtureServer() {
   return http.createServer((req, res) => {
     const base = `http://${req.headers.host}`;
     const url = new URL(req.url, base);
+    if (url.pathname === '/veraltet.xml') {
+      // Wie ein veralteter Feed-Link aus einer Suchmaschine
+      res.writeHead(403);
+      res.end('Forbidden');
+      return;
+    }
     if (url.pathname === '/feed.xml') {
       res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
       res.end(`<?xml version="1.0" encoding="UTF-8"?>

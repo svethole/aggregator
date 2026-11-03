@@ -6,7 +6,7 @@ import {
   requireUser, sessionUser, startSession, endSession, needsSetup, createUser, verifyPassword, setPassword,
   loginAllowed, loginFailed, loginSucceeded,
 } from './auth.js';
-import { discover, ensureSource, refreshSource, refreshAll, isRefreshing } from './feeds.js';
+import { discoverWithFallback, ensureSource, refreshSource, refreshAll, isRefreshing } from './feeds.js';
 import { loadFulltext } from './fulltext.js';
 import { searchSources, searchInfo } from './search.js';
 import { normalizeUrl } from './http.js';
@@ -200,7 +200,7 @@ api.get('/subscriptions', (req, res) => res.json(listSubscriptions(req.user.id))
 
 api.post('/discover', wrap(async (req, res) => {
   try {
-    res.json(await discover(req.body?.url));
+    res.json(await discoverWithFallback(req.body?.url, req.body?.fallbackUrl));
   } catch (err) {
     bad(res, `Die Adresse konnte nicht geprüft werden: ${err.message}`);
   }
